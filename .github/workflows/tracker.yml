@@ -2,15 +2,14 @@ name: NearMint Card Tracker
 
 on:
   schedule:
-    # Runs every 10 minutes.
-    - cron: '*/10 * * * *'
-  workflow_dispatch: # Allows you to manually trigger it from the UI to test
+    - cron: '*/10 * * * *' # Back to every 10 minutes!
+  workflow_dispatch:
 
 jobs:
   run-tracker:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Gives GitHub permission to save seen_cards.json
+      contents: write
 
     steps:
       - name: Checkout Repository Code
@@ -26,7 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4
 
-      - name: Run Scraper
+      - name: Run Scraper (With Hidden Secrets Passed In)
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python nearmint_alert.py
 
       - name: Commit & Save Memory File
