@@ -5,10 +5,10 @@ import os
 import time
 
 # ==========================
-# TELEGRAM SETTINGS
+# TELEGRAM SETTINGS (Securely loaded from the cloud vault)
 # ==========================
-BOT_TOKEN = "8827266849:AAHBwzWnpxWNeXDAJ8fouk-L5rezTKIcTDs" 
-CHAT_ID = "1250061274"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 # ==========================
 # NEARMINT URL
