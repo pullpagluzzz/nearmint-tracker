@@ -47,7 +47,7 @@ def save_seen(cards):
 
 def get_cards():
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     r = requests.get(URL, headers=headers, timeout=30)
@@ -59,7 +59,8 @@ def get_cards():
     for a in soup.find_all("a", href=True):
         href = a["href"]
 
-        if "/product/" in href:
+        # FIXED: NearMint uses /listing/ instead of /product/
+        if "/listing/" in href:
             title = a.get_text(" ", strip=True)
 
             if not title:
