@@ -1,39 +1,115 @@
-name: NearMint Card Tracker
+import requests
+from bs4 import BeautifulSoup
+import json
+import os
+import time
 
-on:
-  schedule:
-    - cron: '*/10 * * * *' # Back to every 10 minutes!
-  workflow_dispatch:
+# ==========================
+# TELEGRAM SETTINGS
+# ==========================
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
-jobs:
-  run-tracker:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout Repository Code
-        uses: actions/checkout@v6
+# ==========================
+# NEARMINT URL
+# ==========================
+URL = "https://nearmint.in/browse?universe=pokemon&format=single&sort=newest"
+DATA_FILE = "seen_cards.json"
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.9'
 
-      - name: Install Scraping Tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(
+            url,
+            json={
+                "chat_id": CHAT_ID,
+                "text": message,
+                "disable_web_page_preview": False,
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"Failed to send Telegram alert: {e}")
 
-      - name: Run Scraper (With Hidden Secrets Passed In)
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python nearmint_alert.py
 
-      - name: Commit & Save Memory File
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_cards.json
-          git commit -m "Update tracker memory [skip ci]" || exit 0
-          git push
+def load_seen():
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_seen(cards):
+    with open(DATA_FILE, "w") as f:
+        json.dump(cards, f)
+
+
+def get_cards():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    r = requests.get(URL, headers=headers, timeout=30)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    cards = []
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+
+        if "/listing/" in href:
+            title = a.get_text(" ", strip=True)
+
+            if not title:
+                continue
+            
+            full_url = (
+                href if href.startswith("http")
+                else f"https://nearmint.in{href}"
+            )
+
+            cards.append({
+                "title": title,
+                "url": full_url
+            })
+
+    unique = []
+    seen_urls = set()
+
+    for card in cards:
+        if card["url"] not in seen_urls:
+            unique.append(card)
+            seen_urls.add(card["url"])
+
+    return unique[:30]
+
+
+def check_new_cards():
+    current = get_cards()
+    old = load_seen()
+
+    old_urls = {x["url"] for x in old}
+    new_cards = []
+
+    for card in current:
+        if card["url"] not in old_urls:
+            new_cards.append(card)
+
+    if old:
+        for card in reversed(new_cards):
+            msg = (
+                f"🆕 *New Pokémon Card Listed*\n\n"
+                f"{card['title']}\n\n"
+                f"{card['url']}"
+            )
+            send_telegram(msg)
+
+    save_seen(current)
+
+    print(f"Checked | Found {len(new_cards)} new")
+
+
+if __name__ == "__main__":
+    check_new_cards()
