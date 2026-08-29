@@ -12,7 +12,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 # ==========================
-# NEARMINT URL
+# NEARMINT
 # ==========================
 URL = "https://nearmint.in/browse?universe=pokemon&format=single&sort=newest"
 DATA_FILE = "seen_cards.json"
@@ -20,7 +20,8 @@ DATA_FILE = "seen_cards.json"
 # ==========================
 # REQUEST SETTINGS
 # ==========================
-MAX_RETRIES = 5
+MAX_RETRIES = 2
+TIMEOUT = 30
 
 HEADERS = {
     "User-Agent": (
@@ -36,6 +37,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://nearmint.in/",
     "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 
@@ -43,15 +45,19 @@ HEADERS = {
 # TELEGRAM
 # ==========================
 def send_telegram(message):
+
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram BOT_TOKEN or CHAT_ID is missing.")
+        print("ERROR: BOT_TOKEN or CHAT_ID is missing.")
         return
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    telegram_url = (
+        f"https://api.telegram.org/bot"
+        f"{BOT_TOKEN}/sendMessage"
+    )
 
     try:
         response = requests.post(
-            url,
+            telegram_url,
             json={
                 "chat_id": CHAT_ID,
                 "text": message,
@@ -63,32 +69,42 @@ def send_telegram(message):
         response.raise_for_status()
         print("Telegram alert sent.")
 
-    except Exception as e:
-        print(f"Failed to send Telegram alert: {e}")
+    except requests.RequestException as e:
+        print(f"Telegram error: {e}")
 
 
 # ==========================
-# LOAD SEEN CARDS
+# LOAD SEEN
 # ==========================
 def load_seen():
+
     if not os.path.exists(DATA_FILE):
         return []
 
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
+        with open(
+            DATA_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
             return json.load(f)
 
     except Exception as e:
-        print(f"Failed to load seen cards: {e}")
+        print(f"Could not load {DATA_FILE}: {e}")
         return []
 
 
 # ==========================
-# SAVE SEEN CARDS
+# SAVE SEEN
 # ==========================
 def save_seen(cards):
+
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
+        with open(
+            DATA_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
             json.dump(
                 cards,
                 f,
@@ -97,11 +113,11 @@ def save_seen(cards):
             )
 
     except Exception as e:
-        print(f"Failed to save seen cards: {e}")
+        print(f"Could not save {DATA_FILE}: {e}")
 
 
 # ==========================
-# GET NEARMINT PAGE
+# GET PAGE
 # ==========================
 def get_page():
 
@@ -111,82 +127,104 @@ def get_page():
     for attempt in range(1, MAX_RETRIES + 1):
 
         try:
+
             print(
                 f"Checking NearMint "
-                f"(attempt {attempt}/{MAX_RETRIES})..."
+                f"(attempt {attempt}/{MAX_RETRIES})"
             )
 
             response = session.get(
                 URL,
-                timeout=30
+                timeout=TIMEOUT
             )
 
             print(
-                f"NearMint response: "
+                f"NearMint HTTP status: "
                 f"{response.status_code}"
             )
 
             # ==========================
-            # RATE LIMIT — HTTP 429
+            # RATE LIMITED
             # ==========================
             if response.status_code == 429:
 
-                retry_after = response.headers.get(
-                    "Retry-After"
-                )
+                if attempt < MAX_RETRIES:
 
-                if retry_after:
-                    try:
-                        wait_time = int(retry_after)
-                    except ValueError:
-                        wait_time = 60
-                else:
-                    # Exponential backoff:
-                    # 30 → 60 → 120 → 240 → 300
-                    wait_time = min(
-                        300,
-                        30 * (2 ** (attempt - 1))
+                    retry_after = response.headers.get(
+                        "Retry-After"
                     )
 
-                # Add small random delay
-                wait_time += random.randint(5, 15)
+                    if retry_after:
+                        try:
+                            wait_time = min(
+                                int(retry_after),
+                                60
+                            )
+                        except ValueError:
+                            wait_time = 20
+                    else:
+                        wait_time = 20
+
+                    wait_time += random.randint(3, 8)
+
+                    print(
+                        f"⚠️ NearMint rate limited "
+                        f"the request (429)."
+                    )
+
+                    print(
+                        f"Waiting {wait_time} seconds "
+                        f"before one final retry..."
+                    )
+
+                    time.sleep(wait_time)
+
+                    continue
 
                 print(
-                    f"⚠️ NearMint rate limited us (429)."
+                    "⚠️ NearMint still returned 429."
                 )
 
                 print(
-                    f"Waiting {wait_time} seconds "
-                    f"before retry..."
+                    "Skipping this run safely."
                 )
 
-                time.sleep(wait_time)
-                continue
+                return None
 
             # ==========================
             # SERVER ERROR
             # ==========================
             if response.status_code >= 500:
 
-                wait_time = min(
-                    300,
-                    30 * (2 ** (attempt - 1))
-                )
+                if attempt < MAX_RETRIES:
+
+                    wait_time = 15 + random.randint(
+                        3,
+                        8
+                    )
+
+                    print(
+                        f"NearMint server error "
+                        f"{response.status_code}."
+                    )
+
+                    print(
+                        f"Retrying in "
+                        f"{wait_time} seconds..."
+                    )
+
+                    time.sleep(wait_time)
+
+                    continue
 
                 print(
-                    f"⚠️ NearMint server error "
-                    f"{response.status_code}."
+                    "NearMint server error persists."
                 )
 
-                print(
-                    f"Waiting {wait_time} seconds..."
-                )
-
-                time.sleep(wait_time)
-                continue
+                return None
 
             # ==========================
-            # OTHER HTTP ERRORS
+            # SUCCESS
             # ==========================
             response.raise_for_status()
 
@@ -195,28 +233,30 @@ def get_page():
         except requests.RequestException as e:
 
             print(
-                f"Request failed: {e}"
+                f"NearMint request error: {e}"
             )
 
-            if attempt == MAX_RETRIES:
-                print(
-                    "❌ NearMint request failed "
-                    "after all retries."
+            if attempt < MAX_RETRIES:
+
+                wait_time = 10 + random.randint(
+                    3,
+                    8
                 )
+
+                print(
+                    f"Retrying in "
+                    f"{wait_time} seconds..."
+                )
+
+                time.sleep(wait_time)
+
+            else:
+
+                print(
+                    "Skipping this run."
+                )
+
                 return None
-
-            wait_time = min(
-                300,
-                30 * (2 ** (attempt - 1))
-            )
-
-            wait_time += random.randint(5, 15)
-
-            print(
-                f"Retrying in {wait_time} seconds..."
-            )
-
-            time.sleep(wait_time)
 
     return None
 
@@ -228,12 +268,8 @@ def get_cards():
 
     html = get_page()
 
-    # IMPORTANT:
-    # If NearMint is still rate limiting us after all retries,
-    # return None instead of an empty list.
-    #
-    # This prevents the script from thinking that all old cards
-    # disappeared and overwriting seen_cards.json.
+    # NEVER replace seen_cards.json
+    # if NearMint failed.
     if html is None:
         return None
 
@@ -251,26 +287,27 @@ def get_cards():
 
         href = a["href"]
 
-        if "/listing/" in href:
+        if "/listing/" not in href:
+            continue
 
-            title = a.get_text(
-                " ",
-                strip=True
-            )
+        title = a.get_text(
+            " ",
+            strip=True
+        )
 
-            if not title:
-                continue
+        if not title:
+            continue
 
-            full_url = (
-                href
-                if href.startswith("http")
-                else f"https://nearmint.in{href}"
-            )
+        full_url = (
+            href
+            if href.startswith("http")
+            else f"https://nearmint.in{href}"
+        )
 
-            cards.append({
-                "title": title,
-                "url": full_url
-            })
+        cards.append({
+            "title": title,
+            "url": full_url
+        })
 
     # ==========================
     # REMOVE DUPLICATES
@@ -286,7 +323,7 @@ def get_cards():
             seen_urls.add(card["url"])
 
     print(
-        f"Found {len(unique)} listings on NearMint."
+        f"Found {len(unique)} listings."
     )
 
     return unique[:30]
@@ -300,16 +337,17 @@ def check_new_cards():
     current = get_cards()
 
     # ==========================
-    # REQUEST FAILED
+    # NEARMINT FAILED
     # ==========================
     if current is None:
 
         print(
-            "⚠️ Could not retrieve NearMint."
+            "⚠️ NearMint could not be checked."
         )
 
         print(
-            "Keeping existing seen_cards.json."
+            "Existing seen_cards.json "
+            "will NOT be changed."
         )
 
         return
@@ -317,8 +355,8 @@ def check_new_cards():
     old = load_seen()
 
     old_urls = {
-        x["url"]
-        for x in old
+        card["url"]
+        for card in old
     }
 
     new_cards = []
@@ -329,36 +367,57 @@ def check_new_cards():
             new_cards.append(card)
 
     # ==========================
-    # SEND NEW CARD ALERTS
+    # FIRST RUN
     # ==========================
-    if old:
+    if not old:
+
+        print(
+            "First run detected."
+        )
+
+        print(
+            f"Saving {len(current)} listings "
+            "without Telegram alerts."
+        )
+
+        save_seen(current)
+
+        return
+
+    # ==========================
+    # NEW CARDS
+    # ==========================
+    if new_cards:
+
+        print(
+            f"🚨 {len(new_cards)} NEW CARD(S) FOUND!"
+        )
 
         for card in reversed(new_cards):
 
-            msg = (
+            message = (
                 "🆕 New Pokémon Card Listed\n\n"
                 f"{card['title']}\n\n"
                 f"{card['url']}"
             )
 
-            send_telegram(msg)
+            send_telegram(message)
 
-            # Small delay between Telegram messages
             time.sleep(1)
 
     else:
 
         print(
-            "First run — establishing card database."
+            "No new cards."
         )
 
     # ==========================
-    # SAVE CURRENT CARDS
+    # SAVE CURRENT
     # ==========================
     save_seen(current)
 
     print(
-        f"Checked | Found {len(new_cards)} new"
+        f"Checked | {len(new_cards)} new"
     )
 
 
@@ -367,12 +426,12 @@ def check_new_cards():
 # ==========================
 if __name__ == "__main__":
 
-    print("=" * 50)
-    print("NearMint Pokémon Tracker")
-    print("=" * 50)
+    print("=" * 60)
+    print("NearMint Pokémon Card Tracker")
+    print("=" * 60)
 
     check_new_cards()
 
-    print("=" * 50)
-    print("Finished")
-    print("=" * 50)
+    print("=" * 60)
+    print("Run finished.")
+    print("=" * 60)
